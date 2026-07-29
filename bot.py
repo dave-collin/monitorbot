@@ -43,12 +43,16 @@ from collector import (
     swap_info,
     top_processes,
     uptime_info,
+    check_image_updates,
 )
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN not set in .env")
+
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL_SECONDS", 86400))
 
 # ── Formatting helpers ──────────────────────────
 
@@ -99,7 +103,7 @@ async def send_status(message, context):
     root_disk = next((d for d in disk if d["mount"] == "/"), disk[0] if disk else None)
 
     text = (
-        f"🖥 *TEST Status*\n"
+        f"🖥 *Server Status*\n"
         f"⏱ `{datetime.now().strftime('%H:%M %d/%m/%Y')}`\n\n"
         f"*CPU:* `{cpu['percent']}%` 🌡 {cpu['temp']}  {fmt_bar(cpu['percent'])}\n"
         f"*RAM:* `{ram['percent']}%` ({ram['used_gb']}/{ram['total_gb']} GB)  {fmt_bar(ram['percent'])}\n"
@@ -157,11 +161,12 @@ async def send_containers(message, context):
         icon = "🟢" if running == total else ("🔴" if running == 0 else "🟠")
         label = f"{icon} {project} ({running}/{total})"
         row.append(InlineKeyboardButton(label, callback_data=f"grp:{project}"))
-        if i % 3 == 0:
+        if i % 2 == 0:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
+    buttons.append([InlineKeyboardButton("🔄 Check All Image Updates", callback_data="qcmd:updates")])
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data="qcmd:start")])
     keyboard = InlineKeyboardMarkup(buttons)
     await message.reply_text("🐳 *Docker Groups:*", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
@@ -205,6 +210,52 @@ async def send_uptime(message, context):
     )
 
 
+async def send_updates(message, context):
+    msg = await message.reply_text("⏳ *Checking for image updates...*\n_(Checking version only, no images will be downloaded)_", parse_mode=ParseMode.MARKDOWN)
+    
+    updated, up_to_date, errors = await asyncio.to_thread(check_image_updates)
+    
+    lines = ["🔄 *Image Update Check Results*\n"]
+    
+    if updated:
+        lines.append("✅ *Updates Available (Not Downloaded):*")
+        for u in updated:
+            lines.append(f"• `{u}`")
+        lines.append("\n_(Please run `docker compose pull` and `docker compose up -d` manually in your server terminal to update)_\n")
+    else:
+        lines.append("✅ *All images are up to date!*")
+        
+    await msg.edit_text("\n".join(lines), reply_markup=back_keyboard(), parse_mode=ParseMode.MARKDOWN)
+
+
+async def background_update_check(context: ContextTypes.DEFAULT_TYPE):
+    if not ADMIN_CHAT_ID:
+        print("⚠️ ADMIN_CHAT_ID not set, skipping update check")
+        return
+        
+    updated, up_to_date, errors = await asyncio.to_thread(check_image_updates)
+    
+    lines = ["🔔 *Automatic Update Alert* 🔔\n"]
+    if updated:
+        lines.append("✅ *Updates Available (Not Downloaded):*")
+        for u in updated:
+            lines.append(f"• `{u}`")
+        lines.append("\n_(Please run `docker compose pull` and `docker compose up -d` manually in your server terminal to update)_")
+    else:
+        lines.append("✅ *All images are up to date!*")
+    
+    if errors:
+        lines.append(f"\n⚠️ Errors: {', '.join(errors)}")
+    
+    text = "\n".join(lines)
+    
+    try:
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text, parse_mode=ParseMode.MARKDOWN)
+        print(f"📤 Update check sent to {ADMIN_CHAT_ID}")
+    except Exception as e:
+        print(f"❌ Failed to send update check: {e}")
+
+
 # ── Command handlers ────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,6 +290,10 @@ async def cmd_uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_uptime(update.message, context)
 
 
+async def cmd_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_updates(update.message, context)
+
+
 # ── Quick command button handler ─────────────────
 
 async def start_nav_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,6 +317,7 @@ async def start_nav_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "net": send_net,
         "top": send_top,
         "uptime": send_uptime,
+        "updates": send_updates,
     }
     await targets[cmd](query.message, context)
     try:
@@ -372,14 +428,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             icon = "🟢" if running == total else ("🔴" if running == 0 else "🟠")
             label = f"{icon} {project} ({running}/{total})"
             row.append(InlineKeyboardButton(label, callback_data=f"grp:{project}"))
-            if i % 3 == 0:
+            if i % 2 == 0:
                 buttons.append(row)
                 row = []
         if row:
             buttons.append(row)
+        buttons.append([InlineKeyboardButton("🔄 Check All Image Updates", callback_data="qcmd:updates")])
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data="qcmd:start")])
         keyboard = InlineKeyboardMarkup(buttons)
         await query.edit_message_text("🐳 *Docker Groups:*", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+
+
 
 
 # ── Main ────────────────────────────────────────
@@ -397,6 +456,7 @@ def main():
             BotCommand("net", "IP & Tailscale"),
             BotCommand("top", "Top 5 processes"),
             BotCommand("uptime", "Server uptime"),
+            BotCommand("updates", "Check image updates"),
         ]
         await app.bot.set_my_commands(commands)
 
@@ -409,8 +469,12 @@ def main():
     app.add_handler(CommandHandler("net", cmd_net))
     app.add_handler(CommandHandler("top", cmd_top))
     app.add_handler(CommandHandler("uptime", cmd_uptime))
+    app.add_handler(CommandHandler("updates", cmd_updates))
     app.add_handler(CallbackQueryHandler(start_nav_handler, pattern=r"^qcmd:"))
     app.add_handler(CallbackQueryHandler(button_handler))
+
+    # Schedule background update check
+    app.job_queue.run_repeating(background_update_check, interval=UPDATE_INTERVAL, first=10)
 
     print("🤖 MonitorBot running...")
     app.run_polling()

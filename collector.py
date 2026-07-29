@@ -284,43 +284,52 @@ def docker_start(container: str) -> tuple[bool, str]:
         return (False, str(e))
 
 
-def docker_group_compose(project: str, compose_cmd: str) -> tuple[bool, str]:
-    """Run docker compose <cmd> in the project directory."""
-    import subprocess
-
-    workdir = docker_group_workdir(project)
-    if not workdir:
-        return (False, f"Working directory not found for '{project}'")
-
-    try:
-        result = subprocess.run(
-            ["docker", "compose", compose_cmd],
-            cwd=workdir, capture_output=True, text=True, timeout=60
-        )
-        if result.returncode == 0:
-            return (True, result.stdout.strip()[-500:] or "OK")
-        else:
-            return (False, result.stderr.strip()[-500:] or result.stdout.strip()[-500:])
-    except subprocess.TimeoutExpired:
-        return (False, "Timeout (>1 min)")
-    except Exception as e:
-        return (False, str(e))
+def docker_group_action(project: str, action: str) -> tuple[bool, str]:
+    groups = docker_groups()
+    if project not in groups:
+        return (False, f"Project '{project}' not found")
+        
+    client = _get_docker()
+    if not client:
+        return (False, "Docker not accessible")
+        
+    success_count = 0
+    errors = []
+    
+    for c in groups[project]:
+        try:
+            cont = client.containers.get(c["name"])
+            if action == "restart":
+                cont.restart()
+            elif action == "stop":
+                cont.stop()
+            elif action == "start":
+                cont.start()
+            success_count += 1
+        except Exception as e:
+            errors.append(f"{c['name']}: {str(e)}")
+            
+    if errors:
+        return (False, "\n".join(errors))
+    return (True, f"{action.capitalize()}ed {success_count} containers")
 
 
 def docker_group_restart(project: str) -> tuple[bool, str]:
-    return docker_group_compose(project, "restart")
+    return docker_group_action(project, "restart")
 
 
 def docker_group_stop(project: str) -> tuple[bool, str]:
-    return docker_group_compose(project, "stop")
+    return docker_group_action(project, "stop")
 
 
 def docker_group_start(project: str) -> tuple[bool, str]:
-    return docker_group_compose(project, "start")
+    return docker_group_action(project, "start")
 
 
 def docker_group_down(project: str) -> tuple[bool, str]:
-    return docker_group_compose(project, "down")
+    # Placeholder: Removing compose dependency means this may no longer be functional
+    # without implementing full compose-file logic.
+    return (False, "Not implemented")
 
 
 def docker_group_workdir(group: str) -> str | None:
@@ -343,49 +352,13 @@ def docker_group_workdir(group: str) -> str | None:
 
 
 def docker_group_rebuild(group: str) -> tuple[bool, str]:
-    """docker compose up -d --build."""
-    import subprocess
-
-    workdir = docker_group_workdir(group)
-    if not workdir:
-        return (False, f"Working directory not found for '{group}'")
-
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "up", "-d", "--build"],
-            cwd=workdir, capture_output=True, text=True, timeout=180
-        )
-        if result.returncode == 0:
-            return (True, result.stdout.strip()[-500:] or "OK")
-        else:
-            return (False, result.stderr.strip()[-500:] or result.stdout.strip()[-500:])
-    except subprocess.TimeoutExpired:
-        return (False, "Timeout (>3 min)")
-    except Exception as e:
-        return (False, str(e))
+    """Not implemented without subprocess."""
+    return (False, "Not implemented")
 
 
 def docker_group_recreate(group: str) -> tuple[bool, str]:
-    """docker compose up -d (pull + recreate)."""
-    import subprocess
-
-    workdir = docker_group_workdir(group)
-    if not workdir:
-        return (False, f"Working directory not found for '{group}'")
-
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "up", "-d"],
-            cwd=workdir, capture_output=True, text=True, timeout=120
-        )
-        if result.returncode == 0:
-            return (True, result.stdout.strip()[-500:] or "OK")
-        else:
-            return (False, result.stderr.strip()[-500:] or result.stdout.strip()[-500:])
-    except subprocess.TimeoutExpired:
-        return (False, "Timeout (>2 min)")
-    except Exception as e:
-        return (False, str(e))
+    """Not implemented without subprocess."""
+    return (False, "Not implemented")
 
 
 def docker_group_has_dockerfile(group: str) -> bool:
@@ -396,6 +369,110 @@ def docker_group_has_dockerfile(group: str) -> bool:
     # Container needs /host_root prefix to access host filesystem
     path = f"{HOST_ROOT}{workdir}/Dockerfile" if os.path.isdir(HOST_ROOT) else f"{workdir}/Dockerfile"
     return os.path.isfile(path)
+
+
+# ── IMAGE UPDATES ────────────────────────────────
+
+def check_image_updates() -> tuple[list[str], list[str], list[str]]:
+    import json
+    import urllib.request
+
+    def get_remote_digest(image_name: str) -> str:
+        registry = "registry-1.docker.io"
+        repo = image_name
+        tag = "latest"
+        
+        if ":" in image_name:
+            repo, tag = image_name.rsplit(":", 1)
+            
+        if "/" not in repo:
+            repo = f"library/{repo}"
+            
+        parts = repo.split("/", 1)
+        if "." in parts[0] and parts[0] != "docker.io":
+            registry = parts[0]
+            repo = parts[1]
+        elif parts[0] == "docker.io":
+            registry = "registry-1.docker.io"
+            repo = parts[1]
+            
+        token = ""
+        try:
+            if registry == "registry-1.docker.io":
+                auth_url = f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull"
+                req = urllib.request.Request(auth_url)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    token = json.loads(response.read().decode()).get("token", "")
+            elif registry == "ghcr.io":
+                auth_url = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{repo}:pull"
+                req = urllib.request.Request(auth_url)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    token = json.loads(response.read().decode()).get("token", "")
+        except Exception:
+            pass
+            
+        manifest_url = f"https://{registry}/v2/{repo}/manifests/{tag}"
+        req = urllib.request.Request(manifest_url)
+        req.add_header("Accept", "application/vnd.docker.distribution.manifest.v2+json")
+        req.add_header("Accept", "application/vnd.docker.distribution.manifest.list.v2+json")
+        req.add_header("Accept", "application/vnd.oci.image.index.v1+json")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+            
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return response.headers.get("Docker-Content-Digest", "")
+        except Exception:
+            return ""
+
+    client = _get_docker()
+    if client is None:
+        return ([], [], ["Docker not accessible"])
+
+    try:
+        containers = client.containers.list(all=True)
+    except Exception as e:
+        return ([], [], [str(e)])
+        
+    image_tags = set()
+    for c in containers:
+        tags = c.image.tags
+        if tags:
+            image_tags.add(tags[0])
+            
+    updated = []
+    up_to_date = []
+    errors = []
+    
+    for tag in image_tags:
+        try:
+            try:
+                img = client.images.get(tag)
+                local_repo_digests = img.attrs.get("RepoDigests", [])
+            except Exception:
+                continue
+                
+            remote_digest = get_remote_digest(tag)
+            
+            if not remote_digest:
+                # Abaikan image lokal atau gagal cek ke registry agar tidak memenuhi pesan UI
+                continue
+                
+            is_updated = True
+            for ld in local_repo_digests:
+                if remote_digest in ld:
+                    is_updated = False
+                    break
+                    
+            if is_updated:
+                updated.append(tag)
+            else:
+                up_to_date.append(tag)
+                
+        except Exception:
+            pass
+            
+    return (updated, up_to_date, errors)
 
 
 # ── TOP PROCESSES ────────────────────────────────
