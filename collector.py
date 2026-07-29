@@ -87,6 +87,13 @@ def disk_info() -> list[dict]:
             # Skip /boot
             if mountpoint.endswith("/boot") or mountpoint.endswith("/boot/efi"):
                 continue
+            # Skip non-essential bind mounts (Docker utilities, etc.)
+            SKIP_PREFIXES = (
+                "/usr/local/libexec/docker",
+                "/usr/local/bin/docker",
+            )
+            if mountpoint.startswith(SKIP_PREFIXES):
+                continue
             # When reading from host proc, mountpoint is already prefixed with /host_root
             path = mountpoint if use_host else f"{HOST_ROOT}{mountpoint}"
             if not os.path.isdir(path):

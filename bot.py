@@ -63,23 +63,29 @@ def fmt_bar(percent: float, width: int = 10) -> str:
         bar = "▒" * filled + "░" * empty
     return bar
 
-# ── Command handlers ────────────────────────────
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 *MonitorBot is ready!*\n\n"
-        "/status — Server summary\n"
-        "/disk — Disk info\n"
-        "/containers — Docker container control\n"
-        "/net — IP & Tailscale\n"
-        "/top — Top processes\n"
-        "/uptime — Server uptime",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+def start_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🖥 status", callback_data="qcmd:status"),
+            InlineKeyboardButton("💾 disk", callback_data="qcmd:disk"),
+            InlineKeyboardButton("🐳 containers", callback_data="qcmd:containers"),
+        ],
+        [
+            InlineKeyboardButton("🌐 net", callback_data="qcmd:net"),
+            InlineKeyboardButton("📊 top", callback_data="qcmd:top"),
+            InlineKeyboardButton("⏱ uptime", callback_data="qcmd:uptime"),
+        ],
+    ])
 
 
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
+def back_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="qcmd:start")]])
+
+
+# ── Response helpers (shared by commands & buttons) ─
+
+async def send_status(message, context):
     data = await asyncio.to_thread(full_status)
 
     cpu = data["cpu"]
@@ -90,7 +96,6 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     up = data["uptime"]
     dk = data["docker"]
 
-    # Most important disk (root)
     root_disk = next((d for d in disk if d["mount"] == "/"), disk[0] if disk else None)
 
     text = (
@@ -115,14 +120,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if net.get("tailscale") and net["tailscale"] != "not running":
         text += f"*Tailscale:* `{net['tailscale']}`\n"
 
-    await msg.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    await message.reply_text(text, reply_markup=back_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 
-async def cmd_disk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def send_disk(message, context):
     disks = await asyncio.to_thread(disk_info)
 
     if not disks:
-        await update.message.reply_text("❌ Failed to read disk info.")
+        await message.reply_text("❌ Failed to read disk info.")
         return
 
     lines = ["💾 *Disk Usage*", ""]
@@ -134,26 +139,135 @@ async def cmd_disk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"   `{bar}` `{d['percent']}%`"
         )
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    await message.reply_text("\n".join(lines), reply_markup=back_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 
-async def cmd_containers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def send_containers(message, context):
     groups = await asyncio.to_thread(docker_groups)
 
     if not groups:
-        await update.message.reply_text("❌ Docker not accessible / no containers.")
+        await message.reply_text("❌ Docker not accessible / no containers.")
         return
 
     buttons = []
-    for project, containers in groups.items():
+    row = []
+    for i, (project, containers) in enumerate(groups.items(), 1):
         running = sum(1 for c in containers if c["status"].startswith("🟢"))
         total = len(containers)
         icon = "🟢" if running == total else ("🔴" if running == 0 else "🟠")
         label = f"{icon} {project} ({running}/{total})"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"grp:{project}")])
-
+        row.append(InlineKeyboardButton(label, callback_data=f"grp:{project}"))
+        if i % 3 == 0:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="qcmd:start")])
     keyboard = InlineKeyboardMarkup(buttons)
-    await update.message.reply_text("🐳 *Docker Groups:*", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    await message.reply_text("🐳 *Docker Groups:*", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+
+
+async def send_net(message, context):
+    net = await asyncio.to_thread(net_info)
+
+    lines = ["🌐 *Network Info*", ""]
+    for iface, ip in net.items():
+        if iface == "tailscale":
+            continue
+        lines.append(f"`{iface}` → `{ip}`")
+
+    ts = net.get("tailscale", "not installed")
+    lines.append(f"\n🔷 *Tailscale:* `{ts}`")
+
+    await message.reply_text("\n".join(lines), reply_markup=back_keyboard(), parse_mode=ParseMode.MARKDOWN)
+
+
+async def send_top(message, context):
+    procs = await asyncio.to_thread(top_processes, 5)
+
+    lines = ["📊 *Top 5 Processes (CPU)*", ""]
+    for i, p in enumerate(procs, 1):
+        lines.append(
+            f"{i}. `{p['name'][:20]}`  CPU:`{p['cpu_percent']:.1f}%`  RAM:`{p['memory_percent']}%`"
+        )
+
+    await message.reply_text("\n".join(lines), reply_markup=back_keyboard(), parse_mode=ParseMode.MARKDOWN)
+
+
+async def send_uptime(message, context):
+    up = await asyncio.to_thread(uptime_info)
+    await message.reply_text(
+        f"⏱ *Server Uptime*\n\n"
+        f"Online since: `{up['boot_time']}`\n"
+        f"Duration: *{up['uptime']}*",
+        reply_markup=back_keyboard(),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+# ── Command handlers ────────────────────────────
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 *MonitorBot is ready!*",
+        reply_markup=start_keyboard(),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_status(update.message, context)
+
+
+async def cmd_disk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_disk(update.message, context)
+
+
+async def cmd_containers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_containers(update.message, context)
+
+
+async def cmd_net(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_net(update.message, context)
+
+
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_top(update.message, context)
+
+
+async def cmd_uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_uptime(update.message, context)
+
+
+# ── Quick command button handler ─────────────────
+
+async def start_nav_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    cmd = query.data.split(":", 1)[1]
+
+    if cmd == "start":
+        await query.edit_message_text(
+            "🤖 *MonitorBot is ready!*",
+            reply_markup=start_keyboard(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    targets = {
+        "status": send_status,
+        "disk": send_disk,
+        "containers": send_containers,
+        "net": send_net,
+        "top": send_top,
+        "uptime": send_uptime,
+    }
+    await targets[cmd](query.message, context)
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
 
 
 # ── Callback handler (interactive menu) ──────────
@@ -251,51 +365,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Back to group list
         groups = await asyncio.to_thread(docker_groups)
         buttons = []
-        for project, containers in groups.items():
+        row = []
+        for i, (project, containers) in enumerate(groups.items(), 1):
             running = sum(1 for c in containers if c["status"].startswith("🟢"))
             total = len(containers)
             icon = "🟢" if running == total else ("🔴" if running == 0 else "🟠")
             label = f"{icon} {project} ({running}/{total})"
-            buttons.append([InlineKeyboardButton(label, callback_data=f"grp:{project}")])
+            row.append(InlineKeyboardButton(label, callback_data=f"grp:{project}"))
+            if i % 3 == 0:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        buttons.append([InlineKeyboardButton("🔙 Back", callback_data="qcmd:start")])
         keyboard = InlineKeyboardMarkup(buttons)
         await query.edit_message_text("🐳 *Docker Groups:*", reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-
-
-async def cmd_net(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    net = await asyncio.to_thread(net_info)
-
-    lines = ["🌐 *Network Info*", ""]
-    for iface, ip in net.items():
-        if iface == "tailscale":
-            continue
-        lines.append(f"`{iface}` → `{ip}`")
-
-    ts = net.get("tailscale", "not installed")
-    lines.append(f"\n🔷 *Tailscale:* `{ts}`")
-
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
-
-
-async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    procs = await asyncio.to_thread(top_processes, 5)
-
-    lines = ["📊 *Top 5 Processes (CPU)*", ""]
-    for i, p in enumerate(procs, 1):
-        lines.append(
-            f"{i}. `{p['name'][:20]}`  CPU:`{p['cpu_percent']:.1f}%`  RAM:`{p['memory_percent']}%`"
-        )
-
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
-
-
-async def cmd_uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    up = await asyncio.to_thread(uptime_info)
-    await update.message.reply_text(
-        f"⏱ *Server Uptime*\n\n"
-        f"Online since: `{up['boot_time']}`\n"
-        f"Duration: *{up['uptime']}*",
-        parse_mode=ParseMode.MARKDOWN,
-    )
 
 
 # ── Main ────────────────────────────────────────
@@ -325,6 +409,7 @@ def main():
     app.add_handler(CommandHandler("net", cmd_net))
     app.add_handler(CommandHandler("top", cmd_top))
     app.add_handler(CommandHandler("uptime", cmd_uptime))
+    app.add_handler(CallbackQueryHandler(start_nav_handler, pattern=r"^qcmd:"))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     print("🤖 MonitorBot running...")
