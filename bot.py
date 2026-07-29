@@ -94,7 +94,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     root_disk = next((d for d in disk if d["mount"] == "/"), disk[0] if disk else None)
 
     text = (
-        f"🖥 *ThinkCentre Status*\n"
+        f"🖥 *TEST Status*\n"
         f"⏱ `{datetime.now().strftime('%H:%M %d/%m/%Y')}`\n\n"
         f"*CPU:* `{cpu['percent']}%` 🌡 {cpu['temp']}  {fmt_bar(cpu['percent'])}\n"
         f"*RAM:* `{ram['percent']}%` ({ram['used_gb']}/{ram['total_gb']} GB)  {fmt_bar(ram['percent'])}\n"
