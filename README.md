@@ -17,7 +17,7 @@ Built with `python-telegram-bot`, `psutil`, and the Docker SDK. Runs in a contai
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USER/monitorbot.git
+git clone https://github.com/geryezio/monitorbot.git
 cd monitorbot
 
 cp .env.example .env

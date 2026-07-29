@@ -4,7 +4,7 @@ Thanks for wanting to help! Here's how to get started.
 
 ## 🧩 What You Can Contribute
 
-- **Bug reports** — found something broken? [Open an issue](https://github.com/Rahmat/monitorbot/issues)
+- **Bug reports** — found something broken? [Open an issue](https://github.com/geryezio/monitorbot/issues)
 - **Feature requests** — ideas for new commands or sensors
 - **Code** — pick an issue and send a PR
 - **Docs** — fix typos, improve README, translate
@@ -16,7 +16,7 @@ Thanks for wanting to help! Here's how to get started.
 
 ```bash
 # Fork & clone your fork
-git clone https://github.com/YOUR_USER/monitorbot.git
+git clone https://github.com/geryezio/monitorbot.git
 cd monitorbot
 
 # Create .env
@@ -85,9 +85,3 @@ Open an issue and include:
 3. What happened instead
 4. Bot logs: `docker compose logs --tail 50`
 5. Your setup: OS, Docker version, which commands have issues
-
----
-
-## 💬 Questions?
-
-Just open a [discussion](https://github.com/Rahmat/monitorbot/discussions) — no question is too basic. This project started as someone learning Python too 🙂

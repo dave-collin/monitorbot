@@ -14,4 +14,4 @@ services:
       - /sys:/sys:ro                                  # CPU temp
       - /proc:/host_proc:ro                           # proses host
       - /:/host_root:ro                               # disk host
-      - /home/fixt1r:/home/fixt1r:ro                  # akses project files
+      - /home/user:/home/user:ro                  # akses project files
