@@ -344,8 +344,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for c in containers:
             lines.append(f"{c['status']} `{c['name']}`")
 
-        # monitor_bot: info only, no controls
-        if project == "monitor_bot":
+        # monitor-bot: info only, no controls
+        if any(c["name"] in ("monitor-bot", "monitor_bot") for c in containers):
             lines.append("\n⚠️ _Manual control via terminal_")
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔙 Back", callback_data="back:list"),
@@ -390,6 +390,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         label = {"restart": "Restart", "stop": "Stop", "start": "Start"}[action]
         await query.edit_message_text(
             f"{emoji} *{label}* — `{project}`\n\n{msg}",
+            reply_markup=back_keyboard(),
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -415,7 +416,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok, msg = await asyncio.to_thread(func, name)
         emoji = "✅" if ok else "❌"
         label = {"restart": "Restart", "stop": "Stop", "start": "Start"}[action]
-        await query.edit_message_text(f"{emoji} *{label}* `{name}`\n{msg}", parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(f"{emoji} *{label}* `{name}`\n{msg}", reply_markup=back_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
     elif data == "back:list":
         # Back to group list
