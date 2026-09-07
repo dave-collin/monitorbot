@@ -1,14 +1,8 @@
 """
 MonitorBot — Telegram bot for ThinkCentre server monitoring.
 
-Commands:
-  /start       — Introduction
-  /status      — Server summary (CPU, RAM, disk, uptime)
-  /disk        — Mount points & usage %
-  /containers  — Docker container status & control
-  /net         — IP & Tailscale info
-  /top         — Top 5 CPU/RAM processes
-  /uptime      — Server uptime
+Command:
+  /start       — Show menu (all features accessible via inline buttons)
 
 Setup:
   1. pip install -r requirements.txt
@@ -266,34 +260,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_status(update.message, context)
-
-
-async def cmd_disk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_disk(update.message, context)
-
-
-async def cmd_containers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_containers(update.message, context)
-
-
-async def cmd_net(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_net(update.message, context)
-
-
-async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_top(update.message, context)
-
-
-async def cmd_uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_uptime(update.message, context)
-
-
-async def cmd_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_updates(update.message, context)
-
-
 # ── Quick command button handler ─────────────────
 
 async def start_nav_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -449,28 +415,11 @@ def main():
 
     # Auto-register commands with Telegram (no BotFather needed)
     async def _setup(app):
-        commands = [
-            BotCommand("start", "Introduction"),
-            BotCommand("status", "Server summary"),
-            BotCommand("disk", "Disk info"),
-            BotCommand("containers", "Docker container control"),
-            BotCommand("net", "IP & Tailscale"),
-            BotCommand("top", "Top 5 processes"),
-            BotCommand("uptime", "Server uptime"),
-            BotCommand("updates", "Check image updates"),
-        ]
-        await app.bot.set_my_commands(commands)
+        await app.bot.set_my_commands([BotCommand("start", "Show menu")])
 
     app.post_init = _setup
 
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("disk", cmd_disk))
-    app.add_handler(CommandHandler("containers", cmd_containers))
-    app.add_handler(CommandHandler("net", cmd_net))
-    app.add_handler(CommandHandler("top", cmd_top))
-    app.add_handler(CommandHandler("uptime", cmd_uptime))
-    app.add_handler(CommandHandler("updates", cmd_updates))
     app.add_handler(CallbackQueryHandler(start_nav_handler, pattern=r"^qcmd:"))
     app.add_handler(CallbackQueryHandler(button_handler))
 
